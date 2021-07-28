@@ -34,7 +34,7 @@ conv_result_data = conv_result.squeeze().detach().numpy()
 
 fig, axarr = plt.subplots(2)
 # the first is source image
-axarr[0].imshow(src_image_data)
+axarr[0].imshow(src_image_data, cmap="gray")
 # the second is the image after convolutional process
-axarr[1].imshow(conv_result_data)
+axarr[1].imshow(conv_result_data, cmap="gray")
 plt.show()
