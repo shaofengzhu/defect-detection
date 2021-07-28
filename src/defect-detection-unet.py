@@ -30,7 +30,7 @@ batch_size = 2
 image_width = 716 // 4
 image_height = 920 // 4
 learning_rate = 0.001
-num_epochs = 1
+num_epochs = 2
 
 class ImageDataset(Dataset):
     def __init__(self, src_image_folder, label_image_folder, transform = None):
@@ -194,7 +194,7 @@ def train_model():
             # if batch_index > 40:
             #     break
 
-    torch.save(model.state_dict(), "saved.pth")
+    torch.save(model.state_dict(), os.path.join(current_location, "saved.pth"))
 
 
 def test_model():
@@ -202,7 +202,7 @@ def test_model():
     test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
 
     model = UNET(in_channels=1, out_channels=1)
-    model.load_state_dict(torch.load("saved.pth"))
+    model.load_state_dict(torch.load(os.path.join(current_location, "saved.pth")))
     model.eval()
     with torch.no_grad():
         target_index = 20
