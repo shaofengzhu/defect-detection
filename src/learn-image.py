@@ -45,8 +45,8 @@ print(label_image_data.max())
 # show two images
 fig, axarr = plt.subplots(2)
 # show the first image with src_image_data
-axarr[0].imshow(src_image_data)
+axarr[0].imshow(src_image_data, cmap="gray")
 # show the second image with label_image_data
-axarr[1].imshow(label_image_data)
+axarr[1].imshow(label_image_data, cmap="gray")
 plt.show()
 
