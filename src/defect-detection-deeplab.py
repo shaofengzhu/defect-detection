@@ -193,25 +193,39 @@ def test_model():
                 background_img = transforms.ToPILImage()(output_background)
                 defect_image = transforms.ToPILImage()(output_defect)
                 # we could show the image
-                background_img.show()
-                defect_image.show()
+                # background_img.show()
+                # defect_image.show()
 
+                # the index who has the max value. As we only have two classes, it's either 0 or 1
                 output_label = output_raw.argmax(dim=0)
                 print(output_label.shape)
                 print(output_label)
 
 
+                # if the defect class is larger than background, it's defect.
+                # ytest should be same as output_label
                 ytest = output_raw[1] > output_raw[0]
 
+                # draw the images
                 f, axarr = plt.subplots(2,3)
                 image_data = image.squeeze(0)[0]
                 label_data = label.squeeze(0)[1]
 
+                # show the image
                 axarr[0,0].imshow(image_data, cmap = "gray")
+
+                # background
                 axarr[0,1].imshow(output_raw[0], cmap="gray")
+
+                # defect
                 axarr[0,2].imshow(output_raw[1], cmap="gray")
+
+                # expected label
                 axarr[1,0].imshow(label_data, cmap = "gray")
+
+                # defect label
                 axarr[1,1].imshow(output_label, cmap = "gray")
+                # show ytest, it should be same as output_label
                 axarr[1,2].imshow(ytest, cmap="gray")
                 plt.show()
 
@@ -222,6 +236,6 @@ def test_model():
 if __name__ == "__main__":
     # test_imagedataset()
     # test_train_one()
-    train_and_save_model()
-    # test_model()
+    # train_and_save_model()
+    test_model()
 
