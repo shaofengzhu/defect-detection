@@ -25,6 +25,9 @@ print(f"label={label_image_full_path}")
 # open image
 src_image = Image.open(src_image_full_path)
 print(src_image.size)
+src_image_rgb = src_image.convert("RGB")
+src_image_rgb.show()
+
 label_image = Image.open(label_image_full_path)
 print(label_image.size)
 
