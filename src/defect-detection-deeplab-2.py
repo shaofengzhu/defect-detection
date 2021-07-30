@@ -29,7 +29,8 @@ batch_size = 2
 image_width = 716 // 4
 image_height = 920 // 4
 learning_rate = 0.0001
-num_epochs = 4
+num_classes = 17
+num_epochs = 2
 
 class ImageDataset(Dataset):
     def __init__(self, src_image_folder, label_image_folder):
@@ -41,6 +42,8 @@ class ImageDataset(Dataset):
         # remove the entries that not fall into the batch
         self.src_img_names = self.src_img_names[0: len(self.src_img_names) - mod]
         print(len(self.src_img_names))
+
+        self.max_class = 0
 
 
     def __len__(self):
@@ -66,22 +69,30 @@ class ImageDataset(Dataset):
         label_image = Image.open(label_img_loc).convert("L")
 
         # also resize the lable image and convert it to tensor
-        y1 = trf_tensor(trf_resize(label_image))
-        # convert it to boolean. If the value is greater than 0, it's the label, otherwise, it's the background
-        y1 = y1.type(torch.BoolTensor)
-        y2 = torch.bitwise_not(y1)
-        # now concat them together, the first one is background, the second is label
-        y = torch.cat([y2, y1], dim=0)
+        label_image_resized = trf_resize(label_image)
+        label_image_data = np.array(label_image_resized)
+        
+        self.max_class = max(self.max_class, label_image_data.max())
 
+        class_masks = None
 
-        return src_image_data, y
+        for class_num in range(num_classes):
+            class_mask = np.zeros_like(label_image_data, dtype=np.float32)
+            class_mask[label_image_data == class_num] = 1.0
+            t = torch.unsqueeze(torch.tensor(class_mask), dim=0)
+            if class_masks is None:
+                class_masks = t
+            else:
+                class_masks = torch.cat((class_masks, t))
+            
+        return src_image_data, class_masks
 
 
 class SegModel(nn.Module):
     def __init__(self):
         super(SegModel, self).__init__()
         # the model just use the deeplabv3
-        self.dl = models.segmentation.deeplabv3_resnet50(pretrained=False, progress=False, num_classes=2)
+        self.dl = models.segmentation.deeplabv3_resnet50(pretrained=False, progress=False, num_classes=num_classes)
 
     def forward(self, x):
         results = self.dl(x)
@@ -108,7 +119,7 @@ def test_imagedataset():
 
     # the labels has two, the first element is background, the second element is the label
     axarr[1,0].imshow(label_image[0], cmap="gray")
-    axarr[1,1].imshow(label_image[1], cmap="gray")
+    axarr[1,1].imshow(label_image.argmax(dim=0), cmap="gray")
     plt.show()
 
 def test_train_one():
@@ -167,7 +178,8 @@ def train_and_save_model():
             # if batch_index > 40:
             #   break
 
-    torch.save(model, os.path.join(current_location, "saved-deeplab.pth"))
+    torch.save(model, os.path.join(current_location, "saved-deeplab-2.pth"))
+    print (f"max_class={train_dataset.max_class}")
 
 
 def test_model():
@@ -175,14 +187,14 @@ def test_model():
     # test_dataset = ImageDataset(train_src_image_folder, train_label_image_folder)
     test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
 
-    model = torch.load(os.path.join(current_location, "saved-deeplab.pth"))
+    model = torch.load(os.path.join(current_location, "saved-deeplab-2.pth"))
     model.eval()
     criterion = nn.BCEWithLogitsLoss()
     with torch.no_grad():
         # only show the one that we are interesting
         # 20, 30 are OK, but
         # 40 are not OK.
-        target_index = 20
+        target_index = 2
         index = 0
         for image, label in test_loader:
             if index == target_index:
@@ -194,28 +206,21 @@ def test_model():
                 output_raw = output.squeeze(0)
 
                 output_background = output_raw[0]
-                output_defect = output_raw[1]
 
                 background_img = transforms.ToPILImage()(output_background)
-                defect_image = transforms.ToPILImage()(output_defect)
                 # we could show the image
                 # background_img.show()
-                # defect_image.show()
 
-                # the index who has the max value. As we only have two classes, it's either 0 or 1
+                # the index who has the max value.
                 output_label = output_raw.argmax(dim=0)
                 print(output_label.shape)
                 print(output_label)
 
 
-                # if the defect class is larger than background, it's defect.
-                # ytest should be same as output_label
-                ytest = output_raw[1] > output_raw[0]
-
                 # draw the images
-                f, axarr = plt.subplots(2,3)
+                f, axarr = plt.subplots(2,2)
                 image_data = image.squeeze(0)[0]
-                label_data = label.squeeze(0)[1]
+                label_data = label.squeeze(0).argmax(dim=0)
 
                 # show the image
                 axarr[0,0].imshow(image_data, cmap = "gray")
@@ -223,16 +228,11 @@ def test_model():
                 # background
                 axarr[0,1].imshow(torch.sigmoid(output_raw[0]), cmap="gray")
 
-                # defect
-                axarr[0,2].imshow(torch.sigmoid(output_raw[1]), cmap="gray")
-
                 # expected label
                 axarr[1,0].imshow(label_data, cmap = "gray")
 
                 # defect label
                 axarr[1,1].imshow(output_label, cmap = "gray")
-                # show ytest, it should be same as output_label
-                axarr[1,2].imshow(ytest, cmap="gray")
                 plt.show()
 
 
