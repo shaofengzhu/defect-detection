@@ -51,7 +51,7 @@ class ImageDataset(Dataset):
         src_image = Image.open(src_img_loc).convert("RGB")
 
         preprocess = transforms.Compose([
-                                    transforms.Resize((image_height, image_width), 2),
+                                    transforms.Resize((image_height, image_width), transforms.InterpolationMode.BICUBIC),
                                     transforms.ToTensor(),
                                     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
         
@@ -59,27 +59,26 @@ class ImageDataset(Dataset):
         src_image_data = preprocess(src_image)
 
 
-        trf_resize = transforms.Resize((image_height, image_width), 2)
-        trf_tensor = transforms.ToTensor()
-
+        trf_resize = transforms.Resize((image_height, image_width), transforms.InterpolationMode.BICUBIC)
         label_img_loc = os.path.join(self.label_image_folder, self.src_img_names[index])
         label_image = Image.open(label_img_loc).convert("L")
+        label_image_resized = trf_resize(label_image)
+        # create numpy data from the image
+        label_image_data = np.array(label_image_resized)
+        # we will then create two classes, the first is the background and the second is the label.
+        defect_class = np.zeros_like(label_image_data)
+        defect_class[label_image_data > 0] = 1.0
+        # background class
+        background_class = np.zeros_like(label_image_data)
+        background_class[label_image_data == 0] = 1.0
+        label_image_classes = torch.tensor([background_class, defect_class])
 
-        # also resize the lable image and convert it to tensor
-        y1 = trf_tensor(trf_resize(label_image))
-        # convert it to boolean. If the value is greater than 0, it's the label, otherwise, it's the background
-        y1 = y1.type(torch.BoolTensor)
-        y2 = torch.bitwise_not(y1)
-        # now concat them together, the first one is background, the second is label
-        y = torch.cat([y2, y1], dim=0)
+        return src_image_data, label_image_classes
 
 
-        return src_image_data, y
-
-
-class SegModel(nn.Module):
+class SegmentationModel(nn.Module):
     def __init__(self):
-        super(SegModel, self).__init__()
+        super(SegmentationModel, self).__init__()
         # the model just use the deeplabv3
         self.dl = models.segmentation.deeplabv3_resnet50(pretrained=False, progress=False, num_classes=2)
 
@@ -115,7 +114,7 @@ def test_train_one():
     train_dataset = ImageDataset(train_src_image_folder, train_label_image_folder)
     train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
 
-    model = SegModel()
+    model = SegmentationModel()
 
     train_iter = iter(train_loader)
     inputs, labels = train_iter.next()
@@ -134,7 +133,7 @@ def train_and_save_model():
     train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
 
     # model
-    model = SegModel()
+    model = SegmentationModel()
 
     # loss
     # criterion = nn.MSELoss(reduction='mean')
@@ -238,10 +237,59 @@ def test_model():
 
             index += 1
 
+def test_predict_using_pretrained_standard_model():
+    """
+    Predict the object using pretrained standard model
+    We will see that the standard model will not work for us
+    """
+    test_dataset = ImageDataset(test_src_image_folder, test_label_image_folder)
+    # test_dataset = ImageDataset(train_src_image_folder, train_label_image_folder)
+    test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
+
+    model = models.segmentation.deeplabv3_resnet50(pretrained=True, progress=False)
+    model.eval()
+    with torch.no_grad():
+        target_index = 20
+        index = 0
+        for image, label in test_loader:
+            if index == target_index:
+                output = model(image)["out"]
+                target = label.float()
+
+                output_classes = output.squeeze(0)
+
+                # the index who has the max value
+                output_label = output_classes.argmax(dim=0)
+                print(output_label.shape)
+                print(output_label)
+
+
+                # draw the images
+                f, axarr = plt.subplots(2,2)
+                image_data = image.squeeze(0)[0]
+                label_data = label.squeeze(0)[1]
+
+                # show the image
+                axarr[0,0].imshow(image_data, cmap = "gray")
+
+                # background
+                axarr[0,1].imshow(torch.sigmoid(output_classes[0]), cmap="gray")
+
+                # expected label
+                axarr[1,0].imshow(label_data, cmap = "gray")
+
+                # defect label
+                axarr[1,1].imshow(output_label, cmap = "gray")
+                plt.show()
+
+
+            index += 1
+
 
 if __name__ == "__main__":
     # test_imagedataset()
     # test_train_one()
     # train_and_save_model()
     test_model()
+    # test_predict_using_pretrained_standard_model()
 

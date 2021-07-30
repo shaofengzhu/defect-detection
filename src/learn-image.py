@@ -2,6 +2,8 @@ from PIL import Image
 import numpy as np
 import os
 import matplotlib.pyplot as plt
+import torch
+import torchvision.transforms as transforms
 
 # assume the following directory structure
 # src/a.py
@@ -52,4 +54,40 @@ axarr[0].imshow(src_image_data, cmap="gray")
 # show the second image with label_image_data
 axarr[1].imshow(label_image_data, cmap="gray")
 plt.show()
+
+
+# When we pass the value to Full Convolutional Network, the input should have three channel, we will also resize it.
+# please note that we use // operator so that we will get integer value
+image_width = 716 // 4
+image_height = 920 // 4
+src_image = Image.open(src_image_full_path).convert("RGB")
+preprocess = transforms.Compose([
+                            transforms.Resize((image_height, image_width), transforms.InterpolationMode.BICUBIC),
+                            transforms.ToTensor(),
+                            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+src_image_data = preprocess(src_image)
+print(src_image_data.shape)
+
+# the above code using transforms.Compose() has the same result as
+y = transforms.Resize((image_height, image_width), transforms.InterpolationMode.BICUBIC)(src_image)
+y = transforms.ToTensor()(y)
+y = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(y)
+
+# now, process the label image
+label_image = Image.open(label_image_full_path).convert("L")
+# create a function that will be used to resize the image
+trf_resize = transforms.Resize((image_height, image_width), transforms.InterpolationMode.BICUBIC)
+label_image_resized = trf_resize(label_image)
+# create numpy data from the image
+label_image_data = np.array(label_image_resized)
+print(label_image_data)
+# we will then create two classes, the first is the background and the second is the label.
+defect_class = np.zeros_like(label_image_data)
+defect_class[label_image_data > 0] = 1.0
+# background class
+background_class = np.zeros_like(label_image_data)
+background_class[label_image_data == 0] = 1.0
+label_image_classes = torch.tensor([background_class, defect_class])
+print(label_image_classes.shape)
+
 
