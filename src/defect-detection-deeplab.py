@@ -29,7 +29,7 @@ batch_size = 2
 image_width = 716 // 4
 image_height = 920 // 4
 learning_rate = 0.0001
-num_epochs = 2
+num_epochs = 4
 
 class ImageDataset(Dataset):
     def __init__(self, src_image_folder, label_image_folder):
@@ -177,14 +177,20 @@ def test_model():
 
     model = torch.load(os.path.join(current_location, "saved-deeplab.pth"))
     model.eval()
+    criterion = nn.BCEWithLogitsLoss()
     with torch.no_grad():
         # only show the one that we are interesting
-        target_index = 20
+        # 20, 30 are OK, but
+        # 40 are not OK.
+        target_index = 40
         index = 0
         for image, label in test_loader:
             if index == target_index:
                 output = model(image)
-                
+                target = label.float()
+                loss = criterion(output, target)
+                print(f"loss={loss}")
+
                 output_raw = output.squeeze(0)
 
                 output_background = output_raw[0]
@@ -215,10 +221,10 @@ def test_model():
                 axarr[0,0].imshow(image_data, cmap = "gray")
 
                 # background
-                axarr[0,1].imshow(output_raw[0], cmap="gray")
+                axarr[0,1].imshow(torch.sigmoid(output_raw[0]), cmap="gray")
 
                 # defect
-                axarr[0,2].imshow(output_raw[1], cmap="gray")
+                axarr[0,2].imshow(torch.sigmoid(output_raw[1]), cmap="gray")
 
                 # expected label
                 axarr[1,0].imshow(label_data, cmap = "gray")
