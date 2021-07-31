@@ -11,8 +11,8 @@ class MyModel(nn.Module):
         super().__init__()
         self.l1 = nn.Linear(784, 32)
         self.relu = nn.ReLU()
-        self.l2 = nn.Linear(32, 20)
-        self.l3 = nn.Linear(20, 10)
+        self.l2 = nn.Linear(32, 16)
+        self.l3 = nn.Linear(16, 10)
 
     def forward(self, x):
         z1 = self.l1(x)
@@ -40,12 +40,12 @@ test_dataset = torchvision.datasets.MNIST(
 
 def train_model():
     model = MyModel()
-    opt = torch.optim.Adam(model.parameters(), lr=0.0005)
+    opt = torch.optim.Adam(model.parameters(), lr=0.0001)
     loss_fn = nn.CrossEntropyLoss()
 
-    train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=100, shuffle=True)
+    train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=10, shuffle=True)
 
-    for epoch in range(20):
+    for epoch in range(30):
         for i, (images, labels) in enumerate(train_loader):
             images = images.reshape(-1, 28 * 28)
 
@@ -61,7 +61,7 @@ def train_model():
             opt.step()
 
             if i % 100 == 0:
-                print(f"epoch {epoch}: loss={loss}")
+                print(f"epoch {epoch} step {i}: loss={loss}")
 
     torch.save(model.state_dict(), "my-mnist.pth")
 
