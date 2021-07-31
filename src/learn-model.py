@@ -65,7 +65,7 @@ def train_model():
 
     torch.save(model.state_dict(), "my-mnist.pth")
 
-def test_model():
+def test_model_one_by_one():
     model = MyModel()
     model.load_state_dict(torch.load("my-mnist.pth"))
     model.eval()
@@ -89,6 +89,23 @@ def test_model():
         inputStr = input("Type Image Index:")
 
 
+def test_model():
+    model = MyModel()
+    model.load_state_dict(torch.load("my-mnist.pth"))
+    model.eval()
+
+    count = 0
+    correct_count = 0
+    for index in range(len(test_dataset)):
+        image, label = test_dataset[index]
+        image = image.reshape(-1, 28 * 28)
+        output = model(image)
+        pred = output.argmax(dim=1)
+        correct = pred.squeeze().item() == label
+        count += 1
+        if correct:
+            correct_count += 1
+    print(f"{correct_count} of {count} are correct. Accuracy={correct_count / count}")
 
 
 def check_dataset():
