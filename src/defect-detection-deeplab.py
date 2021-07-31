@@ -142,7 +142,29 @@ def train_and_save_model():
 
     # optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr = learning_rate)
+    train_loop(train_loader, model, criterion, optimizer)
 
+def load_checkpoint_and_train_and_save_model():
+    train_dataset = ImageDataset(train_src_image_folder, train_label_image_folder)
+    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
+
+    # model
+    model = SegmentationModel()
+
+    # loss
+    # criterion = nn.MSELoss(reduction='mean')
+    # criterion = nn.CrossEntropyLoss()
+    criterion = nn.BCEWithLogitsLoss()
+
+    # optimizer
+    optimizer = torch.optim.Adam(model.parameters(), lr = learning_rate)
+    checkpoint = torch.load("saved-deeplab-checkpoint.pth")
+    model.load_state_dict(checkpoint['state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    train_loop(train_loader, model, criterion, optimizer)
+
+
+def train_loop(train_loader, model, criterion, optimizer):
     # training loop
     n_total_steps = len(train_loader)
     for epoch in range(num_epochs):
@@ -167,6 +189,12 @@ def train_and_save_model():
             #   break
 
     torch.save(model, os.path.join(current_location, "saved-deeplab.pth"))
+    state = {
+        'state_dict': model.state_dict(),
+        'optimizer': optimizer.state_dict()
+    }
+
+    torch.save(state, os.path.join(current_location, "saved-deeplab-checkpoint.pth"))
 
 
 def test_model():
@@ -180,8 +208,8 @@ def test_model():
     with torch.no_grad():
         # only show the one that we are interesting
         # 20, 30 are OK, but
-        # 40 are not OK.
-        target_index = 20
+        # 40, 42 are not OK.
+        target_index = 45
         index = 0
         for image, label in test_loader:
             if index == target_index:
@@ -231,7 +259,7 @@ def test_model():
                 # defect label
                 axarr[1,1].imshow(output_label, cmap = "gray")
                 # show ytest, it should be same as output_label
-                axarr[1,2].imshow(ytest, cmap="gray")
+                # axarr[1,2].imshow(ytest, cmap="gray")
                 plt.show()
 
 
@@ -273,7 +301,7 @@ def test_predict_using_pretrained_standard_model():
                 axarr[0,0].imshow(image_data, cmap = "gray")
 
                 # background
-                axarr[0,1].imshow(torch.sigmoid(output_classes[0]), cmap="gray")
+                # axarr[0,1].imshow(torch.sigmoid(output_classes[0]), cmap="gray")
 
                 # expected label
                 axarr[1,0].imshow(label_data, cmap = "gray")
@@ -290,6 +318,7 @@ if __name__ == "__main__":
     # test_imagedataset()
     # test_train_one()
     # train_and_save_model()
+    # load_checkpoint_and_train_and_save_model()
     test_model()
     # test_predict_using_pretrained_standard_model()
 
