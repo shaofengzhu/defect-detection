@@ -12,4 +12,13 @@ print(a)
 # and the derivative
 print(a.grad)
 
-
+a = torch.tensor([[[1.0, 2.0], [0.0, 4], [0.0, 3]]])
+b = torch.tensor([[[0.0, 2.0], [0.0, 4], [2., 3]]])
+intersection = a.logical_and(b)
+print(intersection)
+print(intersection.sum())
+union = a.logical_or(b)
+print(union)
+print(union.sum())
+accuracy = intersection.sum().item() / union.sum().item()
+print(accuracy)

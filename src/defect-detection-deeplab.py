@@ -219,6 +219,8 @@ def test_model():
                 print(f"loss={loss}")
 
                 output_raw = output.squeeze(0)
+                print(f"max={output_raw.max()}")
+                print(f"min={output_raw.min()}")
 
                 output_background = output_raw[0]
                 output_defect = output_raw[1]
@@ -281,8 +283,8 @@ def test_model_accuracy():
         for image, label in test_loader:
             output = model(image)
             target = label.float()
-            loss = criterion(output, target)
-            print(f"loss={loss}")
+            # loss = criterion(output, target)
+            # print(f"loss={loss}")
 
             output_raw = output.squeeze(0)
 
@@ -308,8 +310,12 @@ def test_model_accuracy():
 
             # As we only have 0 and 1, the simple way is to substract two matrix
             # then get the sum of the absoluate value. Those are the pixels have difference
-            accuracy = 1.0 - torch.abs(label_data - output_label).sum().item() / (image_height * image_width)            
+            # accuracy = 1.0 - torch.abs(label_data - output_label).sum().item() / (image_height * image_width)
+            intersection = output_label.logical_and(label_data)
+            union = output_label.logical_or(label_data)
+            accuracy = intersection.sum().item() / union.sum().item()
             accuracy_list.append(accuracy)
+            print(f"index={index}: accuracy={accuracy}")
 
             index = index + 1
 
