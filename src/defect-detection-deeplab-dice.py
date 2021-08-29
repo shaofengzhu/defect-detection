@@ -74,6 +74,9 @@ class ImageDataset(Dataset):
         background_class[label_image_data == 0] = 1.0
         label_image_classes = torch.tensor([background_class, defect_class])
 
+        # return
+        # src_image_data: [3, W, H]. 3 means 3 channels
+        # label_image_classes: [2, W, H]. The first element is background_class, the second element is defect_class
         return src_image_data, label_image_classes
 
 
@@ -83,6 +86,10 @@ class SegmentationModel(nn.Module):
         # the model just use the deeplabv3
         self.dl = models.segmentation.deeplabv3_resnet50(pretrained=False, progress=False, num_classes=2)
 
+    """
+    x is [batch_size, 3, W, H]
+    return is [batch_size, 2, W, H], where [batch_size, 0] is background_class, [batch_size, 1] is defect_class
+    """
     def forward(self, x):
         results = self.dl(x)
         # as the deeplabv3 returns a dict, we will get the "out" from the dictionary
@@ -93,15 +100,30 @@ class DiceLoss(nn.Module):
     def __init__(self):
         super(DiceLoss, self).__init__()
     
-    def forward(self, inputs, targets, smooth = 1):
-        inputs = F.sigmoid(inputs)
+    def forward(self, inputs, targets):
+        N = targets.size(0)
+        inputs = torch.sigmoid(inputs)
         # flattern labels
-        inputs = inputs.view(-1)
-        targets = targets.view(-1)
+        inputs = inputs.view(N, -1)
+        targets = targets.view(N, -1)
+
+        EPSILON = 1e-7
 
         intersection = (inputs * targets).sum()
-        dice = (2.0 * intersection + smooth)/(inputs.sum() + targets.sum() + smooth)
-        return 1 - dice
+        union = inputs.sum() + targets.sum()
+        dice = (2.0 * intersection + EPSILON)/(union + EPSILON)
+        return 1 - dice/N
+
+
+def calculate_loss(predicts, labels, criterion):
+    # outputs size is [batch_size, 2, W, H]
+    # We only need to use the defect class to calculate the IoU
+    # Get the predicted defect class
+    defect_preds = predicts[:, 1, :, :]
+    # Get the targeted defect class
+    defect_targets = labels.float()[:, 1, :, :]
+    loss = criterion(defect_preds, defect_targets)
+    return loss
 
 
 def test_imagedataset():
@@ -132,14 +154,13 @@ def test_train_one():
 
     train_iter = iter(train_loader)
     inputs, labels = train_iter.next()
-    outputs = model.forward(inputs)
-    print(outputs.shape)
+    predicts = model.forward(inputs)
+    print(predicts.shape)
     print(labels.shape)
 
-    targets = labels.float()
-    criterion = nn.BCEWithLogitsLoss()
     criterion = DiceLoss()
-    loss = criterion(outputs, targets)
+
+    loss = calculate_loss(predicts, labels, criterion)
     print(loss)
 
 
@@ -187,10 +208,7 @@ def train_loop(train_loader, model, criterion, optimizer):
         for batch_index, (images, labels) in enumerate(train_loader):        
             # forward
             predicts = model(images)
-
-            # loss
-            targets = labels.float()
-            loss = criterion(predicts, targets)
+            loss = calculate_loss(predicts, labels, criterion)
 
             # backward
             optimizer.zero_grad()
@@ -232,8 +250,8 @@ def test_model():
                 output = model(image)
                 print(f"max={output.max()}")
                 print(f"min={output.min()}")
-                target = label.float()
-                loss = criterion(output, target)
+
+                loss = calculate_loss(output, label, criterion)
                 print(f"loss={loss}")
 
                 output_raw = output.squeeze(0)
@@ -297,8 +315,8 @@ def test_model_accuracy():
 
         for image, label in test_loader:
             output = model(image)
-            target = label.float()
-            loss = criterion(output, target)
+
+            loss = calculate_loss(output, label, criterion)
             print(f"loss={loss}")
 
             output_raw = output.squeeze(0)
@@ -328,7 +346,7 @@ if __name__ == "__main__":
     # test_imagedataset()
     # test_train_one()
     # train_and_save_model()
-    # load_checkpoint_and_train_and_save_model()
-    test_model()
+    load_checkpoint_and_train_and_save_model()
+    # test_model()
     # test_model_accuracy()
 
