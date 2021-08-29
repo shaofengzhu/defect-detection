@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torchvision.models as models
 import torchvision.transforms as transforms
 from torch.utils.data import Dataset, DataLoader
@@ -88,6 +89,19 @@ class SegmentationModel(nn.Module):
         ret = results["out"]
         return ret
 
+class DiceLoss(nn.Module):
+    def __init__(self):
+        super(DiceLoss, self).__init__()
+    
+    def forward(self, inputs, targets, smooth = 1):
+        inputs = F.sigmoid(inputs)
+        # flattern labels
+        inputs = inputs.view(-1)
+        targets = targets.view(-1)
+
+        intersection = (inputs * targets).sum()
+        dice = (2.0 * intersection + smooth)/(inputs.sum() + targets.sum() + smooth)
+        return 1 - dice
 
 
 def test_imagedataset():
@@ -124,6 +138,7 @@ def test_train_one():
 
     targets = labels.float()
     criterion = nn.BCEWithLogitsLoss()
+    criterion = DiceLoss()
     loss = criterion(outputs, targets)
     print(loss)
 
@@ -138,7 +153,8 @@ def train_and_save_model():
     # loss
     # criterion = nn.MSELoss(reduction='mean')
     # criterion = nn.CrossEntropyLoss()
-    criterion = nn.BCEWithLogitsLoss()
+    # criterion = nn.BCEWithLogitsLoss()
+    criterion = DiceLoss()
 
     # optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr = learning_rate)
@@ -154,11 +170,11 @@ def load_checkpoint_and_train_and_save_model():
     # loss
     # criterion = nn.MSELoss(reduction='mean')
     # criterion = nn.CrossEntropyLoss()
-    criterion = nn.BCEWithLogitsLoss()
+    criterion = DiceLoss()
 
     # optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr = learning_rate)
-    checkpoint = torch.load(os.path.join(current_location, "saved-deeplab-checkpoint.pth"))
+    checkpoint = torch.load(os.path.join(current_location, "saved-deeplab-dice-checkpoint.pth"))
     model.load_state_dict(checkpoint['state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer'])
     train_loop(train_loader, model, criterion, optimizer)
@@ -188,13 +204,13 @@ def train_loop(train_loader, model, criterion, optimizer):
             # if batch_index > 40:
             #   break
 
-    torch.save(model, os.path.join(current_location, "saved-deeplab.pth"))
+    torch.save(model, os.path.join(current_location, "saved-deeplab-dice.pth"))
     state = {
         'state_dict': model.state_dict(),
         'optimizer': optimizer.state_dict()
     }
 
-    torch.save(state, os.path.join(current_location, "saved-deeplab-checkpoint.pth"))
+    torch.save(state, os.path.join(current_location, "saved-deeplab-dice-checkpoint.pth"))
 
 
 def test_model():
@@ -202,18 +218,20 @@ def test_model():
     # test_dataset = ImageDataset(train_src_image_folder, train_label_image_folder)
     test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
 
-    model = torch.load(os.path.join(current_location, "saved-deeplab.pth"))
+    model = torch.load(os.path.join(current_location, "saved-deeplab-dice.pth"))
     model.eval()
-    criterion = nn.BCEWithLogitsLoss()
+    criterion = DiceLoss()
     with torch.no_grad():
         # only show the one that we are interesting
         # 20, 30 are OK, but
         # 40, 42 are not OK.
-        target_index = 385
+        target_index = 20
         index = 0
         for image, label in test_loader:
             if index == target_index:
                 output = model(image)
+                print(f"max={output.max()}")
+                print(f"min={output.min()}")
                 target = label.float()
                 loss = criterion(output, target)
                 print(f"loss={loss}")
@@ -225,26 +243,24 @@ def test_model():
                 output_background = output_raw[0]
                 output_defect = output_raw[1]
 
-                background_img = transforms.ToPILImage()(output_background)
-                defect_image = transforms.ToPILImage()(output_defect)
-                # we could show the image
-                # background_img.show()
-                # defect_image.show()
-
                 # the index who has the max value. As we only have two classes, it's either 0 or 1
                 output_label = output_raw.argmax(dim=0)
                 print(output_label.shape)
                 print(output_label)
 
 
-                # if the defect class is larger than background, it's defect.
-                # ytest should be same as output_label
-                ytest = output_raw[1] > output_raw[0]
-
                 # draw the images
                 f, axarr = plt.subplots(2,3)
                 image_data = image.squeeze(0)[0]
-                label_data = label.squeeze(0)[1]
+                target_label = label.squeeze(0)[1]
+
+                intersection = output_label.logical_and(target_label)
+                union = output_label.logical_or(target_label)
+                accuracy = 1.0
+                if union.sum().item() != 0:
+                    accuracy = intersection.sum().item() / union.sum().item()
+                print(f"index={index}: accuracy={accuracy}")
+
 
                 # show the image
                 axarr[0,0].imshow(image_data, cmap = "gray")
@@ -256,7 +272,7 @@ def test_model():
                 axarr[0,2].imshow(torch.sigmoid(output_raw[1]), cmap="gray")
 
                 # expected label
-                axarr[1,0].imshow(label_data, cmap = "gray")
+                axarr[1,0].imshow(target_label, cmap = "gray")
 
                 # defect label
                 axarr[1,1].imshow(output_label, cmap = "gray")
@@ -272,47 +288,28 @@ def test_model_accuracy():
     # test_dataset = ImageDataset(train_src_image_folder, train_label_image_folder)
     test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
 
-    model = torch.load(os.path.join(current_location, "saved-deeplab.pth"))
+    model = torch.load(os.path.join(current_location, "saved-deeplab-dice.pth"))
     model.eval()
-    criterion = nn.BCEWithLogitsLoss()
+    criterion = DiceLoss()
     with torch.no_grad():
         index = 0
-        target_index = None
         accuracy_list = []
 
         for image, label in test_loader:
             output = model(image)
             target = label.float()
-            # loss = criterion(output, target)
-            # print(f"loss={loss}")
+            loss = criterion(output, target)
+            print(f"loss={loss}")
 
             output_raw = output.squeeze(0)
 
             # the index who has the max value. As we only have two classes, it's either 0 or 1
             output_label = output_raw.argmax(dim=0)
 
-            image_data = image.squeeze(0)[0]
-            label_data = label.squeeze(0)[1]
+            target_label = label.squeeze(0)[1]
 
-            if index == target_index:
-                print(label_data - output_label)
-                print(torch.abs(label_data - output_label).sum())
-
-                # draw the images
-                fig, axarr = plt.subplots(3)
-                # show the image
-                axarr[0].imshow(image_data, cmap = "gray")
-                # expected label
-                axarr[1].imshow(label_data, cmap = "gray")
-                # defect label
-                axarr[2].imshow(output_label, cmap = "gray")
-                plt.show()
-
-            # As we only have 0 and 1, the simple way is to substract two matrix
-            # then get the sum of the absoluate value. Those are the pixels have difference
-            # accuracy = 1.0 - torch.abs(label_data - output_label).sum().item() / (image_height * image_width)
-            intersection = output_label.logical_and(label_data)
-            union = output_label.logical_or(label_data)
+            intersection = output_label.logical_and(target_label)
+            union = output_label.logical_or(target_label)
             accuracy = 1.0
             if union.sum().item() != 0:
                 accuracy = intersection.sum().item() / union.sum().item()
@@ -326,61 +323,12 @@ def test_model_accuracy():
         print(f"The least accuracy index={accuracy_list_np.argmin()}")
 
 
-def test_predict_using_pretrained_standard_model():
-    """
-    Predict the object using pretrained standard model
-    We will see that the standard model will not work for us
-    """
-    test_dataset = ImageDataset(test_src_image_folder, test_label_image_folder)
-    # test_dataset = ImageDataset(train_src_image_folder, train_label_image_folder)
-    test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
-
-    model = models.segmentation.deeplabv3_resnet50(pretrained=True, progress=False)
-    model.eval()
-    with torch.no_grad():
-        target_index = 20
-        index = 0
-        for image, label in test_loader:
-            if index == target_index:
-                output = model(image)["out"]
-                target = label.float()
-
-                output_classes = output.squeeze(0)
-
-                # the index who has the max value
-                output_label = output_classes.argmax(dim=0)
-                print(output_label.shape)
-                print(output_label)
-
-
-                # draw the images
-                f, axarr = plt.subplots(2,2)
-                image_data = image.squeeze(0)[0]
-                label_data = label.squeeze(0)[1]
-
-                # show the image
-                axarr[0,0].imshow(image_data, cmap = "gray")
-
-                # background
-                # axarr[0,1].imshow(torch.sigmoid(output_classes[0]), cmap="gray")
-
-                # expected label
-                axarr[1,0].imshow(label_data, cmap = "gray")
-
-                # defect label
-                axarr[1,1].imshow(output_label, cmap = "gray")
-                plt.show()
-
-
-            index += 1
-
 
 if __name__ == "__main__":
     # test_imagedataset()
     # test_train_one()
     # train_and_save_model()
     # load_checkpoint_and_train_and_save_model()
-    # test_model()
-    test_model_accuracy()
-    # test_predict_using_pretrained_standard_model()
+    test_model()
+    # test_model_accuracy()
 
