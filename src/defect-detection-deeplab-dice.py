@@ -10,6 +10,12 @@ from PIL import Image
 import numpy as np
 import os
 import matplotlib.pyplot as plt
+from enum import Enum
+
+class LossMethod(Enum):
+    Bce = 0
+    Dice = 1
+    DiceBce = 2
 
 
 # assume the following directory structure
@@ -31,6 +37,8 @@ image_width = 716 // 4
 image_height = 920 // 4
 learning_rate = 0.0001
 num_epochs = 2
+# define a global variable to indicate which loss method to use
+loss_method = LossMethod.DiceBce
 
 class ImageDataset(Dataset):
     def __init__(self, src_image_folder, label_image_folder):
@@ -115,15 +123,37 @@ class DiceLoss(nn.Module):
         return 1 - dice/N
 
 
-def calculate_loss(predicts, labels, criterion):
-    # outputs size is [batch_size, 2, W, H]
+dice_criterion = DiceLoss()
+bce_criterion = nn.BCEWithLogitsLoss()
+
+def calculate_loss(predicts, labels):
+    # convert labels to float() as BCEWithLogitsLoss requires float numbers
+    labels = labels.float()
+
+    # predicts size is [batch_size, 2, W, H]
     # We only need to use the defect class to calculate the IoU
     # Get the predicted defect class
     defect_preds = predicts[:, 1, :, :]
     # Get the targeted defect class
-    defect_targets = labels.float()[:, 1, :, :]
-    loss = criterion(defect_preds, defect_targets)
-    return loss
+    defect_targets = labels[:, 1, :, :]
+
+    if loss_method == LossMethod.Bce:
+        bce_loss = bce_criterion(predicts, labels)
+        loss = bce_loss
+        return loss
+    elif loss_method == LossMethod.Dice:
+        dice_loss = dice_criterion(defect_preds, defect_targets)
+        loss = dice_loss 
+        return loss
+    else:
+        # loss_method == LossMethod.DiceBce:
+        dice_loss = dice_criterion(defect_preds, defect_targets)
+        bce_loss = bce_criterion(predicts, labels)
+        # After train about 30 epoches, the dice_loss is in the range of 0.5 and bce_loss is in the range of 0.01
+        # we will divide the dice_loss by 20 times to make them equally weight
+        loss = bce_loss + dice_loss / 20.0
+
+        return loss
 
 
 def test_imagedataset():
@@ -158,9 +188,7 @@ def test_train_one():
     print(predicts.shape)
     print(labels.shape)
 
-    criterion = DiceLoss()
-
-    loss = calculate_loss(predicts, labels, criterion)
+    loss = calculate_loss(predicts, labels)
     print(loss)
 
 
@@ -171,15 +199,9 @@ def train_and_save_model():
     # model
     model = SegmentationModel()
 
-    # loss
-    # criterion = nn.MSELoss(reduction='mean')
-    # criterion = nn.CrossEntropyLoss()
-    # criterion = nn.BCEWithLogitsLoss()
-    criterion = DiceLoss()
-
     # optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr = learning_rate)
-    train_loop(train_loader, model, criterion, optimizer)
+    train_loop(train_loader, model, optimizer)
 
 def load_checkpoint_and_train_and_save_model():
     train_dataset = ImageDataset(train_src_image_folder, train_label_image_folder)
@@ -188,27 +210,22 @@ def load_checkpoint_and_train_and_save_model():
     # model
     model = SegmentationModel()
 
-    # loss
-    # criterion = nn.MSELoss(reduction='mean')
-    # criterion = nn.CrossEntropyLoss()
-    criterion = DiceLoss()
-
     # optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr = learning_rate)
-    checkpoint = torch.load(os.path.join(current_location, "saved-deeplab-dice-checkpoint.pth"))
+    checkpoint = torch.load(os.path.join(current_location, f"saved-deeplab-{loss_method.name}-checkpoint.pth"))
     model.load_state_dict(checkpoint['state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer'])
-    train_loop(train_loader, model, criterion, optimizer)
+    train_loop(train_loader, model, optimizer)
 
 
-def train_loop(train_loader, model, criterion, optimizer):
+def train_loop(train_loader, model, optimizer):
     # training loop
     n_total_steps = len(train_loader)
     for epoch in range(num_epochs):
         for batch_index, (images, labels) in enumerate(train_loader):        
             # forward
             predicts = model(images)
-            loss = calculate_loss(predicts, labels, criterion)
+            loss = calculate_loss(predicts, labels)
 
             # backward
             optimizer.zero_grad()
@@ -220,15 +237,15 @@ def train_loop(train_loader, model, criterion, optimizer):
 
             # During test, we could break earlier
             # if batch_index > 40:
-            #   break
+            #    break
 
-    torch.save(model, os.path.join(current_location, "saved-deeplab-dice.pth"))
+    torch.save(model, os.path.join(current_location, f"saved-deeplab-{loss_method.name}.pth"))
     state = {
         'state_dict': model.state_dict(),
         'optimizer': optimizer.state_dict()
     }
 
-    torch.save(state, os.path.join(current_location, "saved-deeplab-dice-checkpoint.pth"))
+    torch.save(state, os.path.join(current_location, f"saved-deeplab-{loss_method.name}-checkpoint.pth"))
 
 
 def test_model():
@@ -236,9 +253,8 @@ def test_model():
     # test_dataset = ImageDataset(train_src_image_folder, train_label_image_folder)
     test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
 
-    model = torch.load(os.path.join(current_location, "saved-deeplab-dice.pth"))
+    model = torch.load(os.path.join(current_location, f"saved-deeplab-{loss_method.name}.pth"))
     model.eval()
-    criterion = DiceLoss()
     with torch.no_grad():
         # only show the one that we are interesting
         # 20, 30 are OK, but
@@ -251,7 +267,7 @@ def test_model():
                 print(f"max={output.max()}")
                 print(f"min={output.min()}")
 
-                loss = calculate_loss(output, label, criterion)
+                loss = calculate_loss(output, label)
                 print(f"loss={loss}")
 
                 output_raw = output.squeeze(0)
@@ -306,9 +322,8 @@ def test_model_accuracy():
     # test_dataset = ImageDataset(train_src_image_folder, train_label_image_folder)
     test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
 
-    model = torch.load(os.path.join(current_location, "saved-deeplab-dice.pth"))
+    model = torch.load(os.path.join(current_location, f"saved-deeplab-{loss_method.name}.pth"))
     model.eval()
-    criterion = DiceLoss()
     with torch.no_grad():
         index = 0
         accuracy_list = []
@@ -316,7 +331,7 @@ def test_model_accuracy():
         for image, label in test_loader:
             output = model(image)
 
-            loss = calculate_loss(output, label, criterion)
+            loss = calculate_loss(output, label)
             print(f"loss={loss}")
 
             output_raw = output.squeeze(0)
@@ -343,10 +358,11 @@ def test_model_accuracy():
 
 
 if __name__ == "__main__":
+    print(f"loss_method={loss_method.name}")
     # test_imagedataset()
     # test_train_one()
-    # train_and_save_model()
-    load_checkpoint_and_train_and_save_model()
+    train_and_save_model()
+    # load_checkpoint_and_train_and_save_model()
     # test_model()
     # test_model_accuracy()
 
